@@ -21,6 +21,7 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
+
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.builders.logging.ProjectBuilderLogger;
@@ -42,8 +43,14 @@ import org.jetbrains.osgi.jps.model.impl.JpsOsmorcModuleExtensionImpl;
 import org.jetbrains.osgi.jps.util.OsgiBuildUtil;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -51,6 +58,9 @@ import static com.intellij.util.ObjectUtils.coalesce;
 
 public class OsgiBuildSession implements Reporter {
   private static final Logger LOG = Logger.getInstance(OsgiBuildSession.class);
+
+  private static final String META_INF = "META-INF";
+  private static final String OSGI_INF = "OSGI-INF";
 
   private OsmorcBuildTarget myTarget;
   private CompileContext myContext;
@@ -95,7 +105,49 @@ public class OsgiBuildSession implements Reporter {
       logger.logCompiledFiles(myOutputJarFiles, OsmorcBuilder.ID, "Built OSGi bundles:");
     }
 
+    if (myExtension.isExtractMetaInfOsgIInfToTargetClasses()) {
+          extractJarToTargetClases();
+    }
+
     context.processMessage(DoneSomethingNotification.INSTANCE);
+  }
+
+  private void extractJarToTargetClases() {
+    for (File file : myOutputJarFiles) {
+      try (JarFile jarFile = new JarFile(file)){
+        for (JarEntry entry : Collections.list(jarFile.entries())) {
+            if (entry.getName().startsWith(META_INF) ||
+                entry.getName().startsWith(OSGI_INF)) {
+                try (InputStream is = jarFile.getInputStream(entry)) {
+                    File targetFile = new File(myModuleOutputDir, entry.getName());
+                    if (entry.isDirectory()) {
+                        if (!targetFile.exists()) {
+                            targetFile.mkdirs();
+                        }
+                    } else {
+                        if (!targetFile.getParentFile().exists()) {
+                            targetFile.getParentFile().mkdirs();
+                        }
+                        try (FileOutputStream fos = new FileOutputStream(targetFile)) {
+                            // Allocate a buffer for reading the entry data.
+                            byte[] buffer = new byte[1024];
+                            int bytesRead;
+
+                            // Read the entry data and write it to the output file.
+
+                            while ((bytesRead = is.read(buffer)) != -1) {
+                                fos.write(buffer, 0, bytesRead);
+                            }
+                            fos.flush();
+                        }
+                    }
+                }
+            }
+        }
+      } catch (IOException e) {
+          error(e.getMessage(), e.getCause(), file.getPath(), -1);
+      }
+    }
   }
 
   private void prepare() throws OsgiBuildException {
