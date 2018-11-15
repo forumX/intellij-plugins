@@ -46,8 +46,6 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.*;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -106,47 +104,74 @@ public class OsgiBuildSession implements Reporter {
     }
 
     if (myExtension.isExtractMetaInfOsgIInfToTargetClasses()) {
-          extractJarToTargetClases();
+          extractJarToTargetClasses();
     }
 
     context.processMessage(DoneSomethingNotification.INSTANCE);
   }
 
-  private void extractJarToTargetClases() {
+  private void extractJarToTargetClasses() throws IOException {
     for (File file : myOutputJarFiles) {
-      try (JarFile jarFile = new JarFile(file)){
+      try (JarFile jarFile = new JarFile(file)) {
+
+        boolean extractedMetaInf = false;
+        boolean extractedOsgiInf = false;
+
         for (JarEntry entry : Collections.list(jarFile.entries())) {
-            if (entry.getName().startsWith(META_INF) ||
-                entry.getName().startsWith(OSGI_INF)) {
-                try (InputStream is = jarFile.getInputStream(entry)) {
-                    File targetFile = new File(myModuleOutputDir, entry.getName());
-                    if (entry.isDirectory()) {
-                        if (!targetFile.exists()) {
-                            targetFile.mkdirs();
-                        }
-                    } else {
-                        if (!targetFile.getParentFile().exists()) {
-                            targetFile.getParentFile().mkdirs();
-                        }
-                        try (FileOutputStream fos = new FileOutputStream(targetFile)) {
-                            // Allocate a buffer for reading the entry data.
-                            byte[] buffer = new byte[1024];
-                            int bytesRead;
 
-                            // Read the entry data and write it to the output file.
+          if (extractedMetaInf && extractedOsgiInf) {
+            break;
+          }
 
-                            while ((bytesRead = is.read(buffer)) != -1) {
-                                fos.write(buffer, 0, bytesRead);
-                            }
-                            fos.flush();
-                        }
-                    }
-                }
-            }
+          if (entry.getName().startsWith(META_INF)) {
+            extractEntry(jarFile, entry);
+            extractedMetaInf = true;
+
+          }
+
+          if (entry.getName().startsWith(OSGI_INF)) {
+            extractEntry(jarFile, entry);
+            extractedOsgiInf = true;
+          }
+
+
         }
-      } catch (IOException e) {
-          error(e.getMessage(), e.getCause(), file.getPath(), -1);
       }
+
+    }
+  }
+
+  private void extractEntry(JarFile jarFile, JarEntry entry) throws IOException {
+
+    try (InputStream is = jarFile.getInputStream(entry)) {
+
+      File targetFile = new File(myModuleOutputDir, entry.getName());
+
+      if (entry.isDirectory()) {
+        if (!targetFile.exists()) {
+          targetFile.mkdirs();
+        }
+
+      } else {
+        if (!targetFile.getParentFile().exists()) {
+          targetFile.getParentFile().mkdirs();
+        }
+        try (FileOutputStream fos = new FileOutputStream(targetFile)) {
+          // Allocate a buffer for reading the entry data.
+          byte[] buffer = new byte[1024];
+          int bytesRead;
+
+          // Read the entry data and write it to the output file.
+
+          while ((bytesRead = is.read(buffer)) != -1) {
+            fos.write(buffer, 0, bytesRead);
+          }
+          fos.flush();
+        }
+      }
+    } catch (IOException e) {
+      error(e.getMessage(), e.getCause(), jarFile.getName(), -1);
+      throw e;
     }
   }
 
